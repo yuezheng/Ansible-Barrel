@@ -1,7 +1,7 @@
 #  -*- coding: utf-8 -*-
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 """
-The wrapper of Ansible Task Runner
+The wrapper of Ansible Runner for Task and Playbook
 Reference from Ansible Python API Example:
      http://docs.ansible.com/ansible/latest/dev_guide/developing_api.html
 """
@@ -11,6 +11,7 @@ from collections import namedtuple
 
 from ansible import constants as C
 from ansible.executor.task_queue_manager import TaskQueueManager
+from ansible.executor.playbook_executor import PlaybookExecutor
 from ansible.inventory.manager import InventoryManager
 from ansible.parsing.dataloader import DataLoader
 from ansible.playbook.play import Play
@@ -21,7 +22,7 @@ PLAY_NAME = "Ansible Play"
 
 
 class ResultsCollector(CallbackBase):
-    """Default callback of runner"""
+    """Default callback of task runner"""
 
     def __init__(self, *args, **kwargs):
         super(ResultsCollector, self).__init__(*args, **kwargs)
@@ -39,85 +40,26 @@ class ResultsCollector(CallbackBase):
         self.host_failed[result._host.get_name()] = result
 
 
-class TaskRunner(object):
-    """Task Runner for initialize Ansible API."""
+class PlaybookResultsCollector(CallbackBase):
+    """Default callback of playbook runner"""
 
-    def __init__(self, hosts, username, tasks,
-                 password=None, key_file=None, result_callback=None,
-                 ssh_retries=6):
-        """Construct task ansbile task runner and prepare arguments
+    def __init__(self, *args, **kwargs):
+        super(PlaybookExecutor, self).__init__(*args, **kwargs)
 
-        :param hosts: List of host ip address
-        :param username: Username used to ssh login
-        :param password: Password used to ssh login
-        :param key_file: ssh key used to ssh login
-        :param tasks: List of task definition
-        :param result_callback: Instance of class inherited from BaseCallback
-        :param ssh_retries: Retries for ssh connection failed
-        """
 
+class BaseRunner(object):
+    """Base Runner for tasks and playbook."""
+    def __init__(self, hosts=None, username=None, password=None, key_file=None,
+                 timeout=None, ssh_retries=6):
         self.hosts = hosts
         self._create_inventory()
 
-        self.tasks = tasks
-        self._create_source()
-
-        if result_callback:
-            self.callback = result_callback
-        else:
-            self.callback = ResultsCollector()
-
         self._set_options(username, module_path='',
                           key_file=key_file,
-                          ssh_retries=ssh_retries)
+                          ssh_retries=ssh_retries,
+                          timeout=timeout)
         self.password = password
-        self._create_tqm()
-
-    def _create_tqm(self):
-        if self.password:
-            passwords = {"conn_pass": self.password}
-        else:
-            passwords = None
-        self.tqm = TaskQueueManager(
-            inventory=self.inventory,
-            variable_manager=self.variable_manager,
-            loader=self.loader,
-            options=self.options,
-            passwords=passwords,
-            stdout_callback=self.callback
-        )
-
-    def _set_options(self, username, forks=100, become=None,
-                     become_method=None, become_user=None, check=False,
-                     key_file=None,
-                     module_path="/to/mymodules",
-                     ssh_retries=6):
-        # since API is constructed for CLI it expects certain options to
-        # always be set, named tuple 'fakes' the args parsing options object
-        Options = namedtuple('Options',
-                            ['connection',
-                             'module_path',
-                             'forks',
-                             'become',
-                             'become_method',
-                             'become_user',
-                             'check',
-                             'private_key_file',
-                             'diff'])
-        self.options = Options(connection='ssh',
-                               module_path=[module_path],
-                               forks=forks,
-                               become=become,
-                               become_method=become_method,
-                               become_user=become_user,
-                               check=check,
-                               private_key_file=key_file,
-                               diff=False)
-        # NOTE(ZhengYue): use this setting to ignore the
-        # first ssh connection notice.
-        C.HOST_KEY_CHECKING = False
-        C.DEPRECATION_WARNINGS = False
-        C.ANSIBLE_SSH_RETRIES = ssh_retries
+        self.key_file = key_file
 
     def _create_inventory(self):
         # create inventory and pass to variable manager
@@ -133,6 +75,89 @@ class TaskRunner(object):
         # to give you a unifed view of variables available in each context
         self.variable_manager = VariableManager(loader=self.loader,
                                                 inventory=self.inventory)
+
+    def _set_options(self, username="root", forks=100, become=None,
+                     become_method=None, become_user=None, check=False,
+                     key_file=None,
+                     module_path="/to/mymodules",
+                     ssh_retries=6,
+                     timeout=None):
+        # since API is constructed for CLI it expects certain options to
+        # always be set, named tuple 'fakes' the args parsing options object
+        Options = namedtuple('Options',
+                            ['connection',
+                             'remote_user',
+                             'module_path',
+                             'forks',
+                             'become',
+                             'become_method',
+                             'become_user',
+                             'check',
+                             'private_key_file',
+                             'diff'])
+        self.options = Options(connection='ssh',
+                               remote_user=username,
+                               module_path=[module_path],
+                               forks=forks,
+                               become=become,
+                               become_method=become_method,
+                               become_user=become_user,
+                               check=check,
+                               private_key_file=key_file,
+                               diff=False)
+        C.HOST_KEY_CHECKING = False
+        C.DEPRECATION_WARNINGS = False
+        C.ANSIBLE_SSH_RETRIES = ssh_retries
+        C.ANSIBLE_TIMEOUT = timeout
+
+    def set_extra_vars(self, extra_vars):
+        self.variable_manager.__setstate__({"extra_vars": extra_vars})
+
+
+class TaskRunner(BaseRunner):
+    """Task Runner for initialize Ansible API."""
+
+    def __init__(self, hosts, username, tasks,
+                 password=None, key_file=None,
+                 timeout=None, ssh_retries=6,
+                 result_callback=None):
+        """Construct task ansbile task runner and prepare arguments
+
+        :param hosts: List of host ip address
+        :param username: Username used to ssh login
+        :param password: Password used to ssh login
+        :param key_file: ssh key used to ssh login
+        :param tasks: List of task definition
+        :param result_callback: Instance of class inherited from BaseCallback
+        :param ssh_retries: Retries for ssh connection failed
+        """
+        super(TaskRunner, self).__init__(hosts, username, password, key_file, timeout, ssh_retries)
+
+        self.tasks = tasks
+        self._create_source()
+
+        if result_callback:
+            self.callback = result_callback
+        else:
+            self.callback = ResultsCollector()
+
+        self._create_tqm()
+
+    def _create_tqm(self):
+        if self.password:
+            passwords = {"conn_pass": self.password}
+        elif self.key_file:
+            passwords = None
+        else:
+            passwords = {"vault_pass": "secret"}
+        self.tqm = TaskQueueManager(
+            inventory=self.inventory,
+            variable_manager=self.variable_manager,
+            loader=self.loader,
+            options=self.options,
+            passwords=passwords,
+            stdout_callback=self.callback
+        )
 
     def _create_source(self):
         self.play_source = dict(
@@ -152,4 +177,38 @@ class TaskRunner(object):
             if self.tqm is not None:
                 self.tqm.cleanup()
             # Remove ansible tmpdir
+            shutil.rmtree(C.DEFAULT_LOCAL_TMP, True)
+
+
+class PlaybookRunner(BaseRunner):
+
+    def __init__(self, hosts, username, playbook,
+                 password=None, key_file=None,
+                 timeout=None, ssh_retries=6,
+                 result_callback=None):
+        super(PlaybookRunner, self).__init__(hosts, username, password, key_file,
+                                             timeout, ssh_retries)
+        self.playbook = playbook
+        if result_callback:
+            self.callback = result_callback
+        else:
+            self.callback = PlaybookResultsCollector()
+
+    def _create_executor(self):
+        if self.password:
+            passwords = {"conn_pass": self.password}
+        elif self.key_file:
+            passwords = None
+        else:
+            passwords = {"vault_pass": "secret"}
+        self.executor = PlaybookExecutor([self.playbook], self.inventory,
+                                         self.variable_manager, self.loader,
+                                         self.options, passwords)
+        self.executor._tqm._stdout_callback = self.callback
+
+    def run(self):
+        try:
+            result = self.executor.run()
+            return result
+        finally:
             shutil.rmtree(C.DEFAULT_LOCAL_TMP, True)
