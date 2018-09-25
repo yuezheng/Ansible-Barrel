@@ -16,6 +16,7 @@ from ansible.inventory.manager import InventoryManager
 from ansible.parsing.dataloader import DataLoader
 from ansible.playbook.play import Play
 from ansible.plugins.callback import CallbackBase
+from ansible.plugins.callback.json import CallbackModule
 from ansible.vars.manager import VariableManager
 
 PLAY_NAME = "Ansible Play"
@@ -40,11 +41,12 @@ class ResultsCollector(CallbackBase):
         self.host_failed[result._host.get_name()] = result
 
 
-class PlaybookResultsCollector(CallbackBase):
+class PlaybookResultsCollector(CallbackModule):
     """Default callback of playbook runner"""
 
     def __init__(self, *args, **kwargs):
-        super(PlaybookExecutor, self).__init__(*args, **kwargs)
+        super(PlaybookResultsCollector, self).__init__(*args, **kwargs)
+        self.results = []
 
 
 class BaseRunner(object):
@@ -94,7 +96,11 @@ class BaseRunner(object):
                              'become_user',
                              'check',
                              'private_key_file',
-                             'diff'])
+                             'diff',
+                             'listhosts',
+                             'listtasks',
+                             'listtags',
+                             'syntax'])
         self.options = Options(connection='ssh',
                                remote_user=username,
                                module_path=[module_path],
@@ -104,11 +110,16 @@ class BaseRunner(object):
                                become_user=become_user,
                                check=check,
                                private_key_file=key_file,
-                               diff=False)
+                               diff=False,
+                               listhosts=None,
+                               listtasks=None,
+                               listtags=None,
+                               syntax=None)
         C.HOST_KEY_CHECKING = False
         C.DEPRECATION_WARNINGS = False
         C.ANSIBLE_SSH_RETRIES = ssh_retries
         C.ANSIBLE_TIMEOUT = timeout
+        C.COMMAND_WARNINGS = False
 
     def set_extra_vars(self, extra_vars):
         self.variable_manager.__setstate__({"extra_vars": extra_vars})
@@ -194,6 +205,9 @@ class PlaybookRunner(BaseRunner):
         else:
             self.callback = PlaybookResultsCollector()
 
+        self.options
+        self._create_executor()
+
     def _create_executor(self):
         if self.password:
             passwords = {"conn_pass": self.password}
@@ -208,7 +222,6 @@ class PlaybookRunner(BaseRunner):
 
     def run(self):
         try:
-            result = self.executor.run()
-            return result
+            self.executor.run()
         finally:
             shutil.rmtree(C.DEFAULT_LOCAL_TMP, True)
