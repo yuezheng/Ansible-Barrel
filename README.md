@@ -3,7 +3,9 @@ A wrapper of Ansible Python API, provide easier to use invocation methods
 
 Example of task(adhoc):
 
-'''
+
+```python
+
 from ansible_util import TaskRunner
 
 username = "root"
@@ -13,11 +15,11 @@ task = dict(action=dict(module="setup", args="filter=ansible_distribution*"))
 runner = TaskRunner(hosts, default_username, [task],
                     password, key_file)
 runner.run()
-'''
+```
 
 Get results:
 
-'''
+```python
 from ansible.plugins.callback import CallbackBase
 
 # Define own result callback class
@@ -55,4 +57,4 @@ task = dict(action=dict(module="setup", args="filter=ansible_distribution*"))
 runner = TaskRunner(hosts, default_username, [task],
                     password, key_file, callback=TaskCallback())
 runner.run()
-'''
+```
