@@ -1,8 +1,7 @@
 # Ansible-Barrel
 A wrapper of Ansible Python API, provide easier to use invocation methods
 
-Example of task(adhoc):
-
+## Example of task(adhoc):
 
 ```python
 
@@ -57,4 +56,21 @@ task = dict(action=dict(module="setup", args="filter=ansible_distribution*"))
 runner = TaskRunner(hosts, default_username, [task],
                     password, key_file, callback=TaskCallback())
 runner.run()
+```
+
+## Example of playbook
+
+```python
+from ansible_util import PlaybookResultsCollector
+
+# init result collector
+callback = PlaybookResultsCollector()
+
+# Path of playbook file
+playbook_path = "./test_playbook.yml"
+
+runner = PlaybookRunner(hosts, account, playbook_path, result_callback=callback)
+runner.run()
+
+print(callback.results)
 ```
