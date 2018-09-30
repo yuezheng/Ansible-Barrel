@@ -46,14 +46,35 @@ class PlaybookResultsCollector(CallbackModule):
 
     def __init__(self, *args, **kwargs):
         super(PlaybookResultsCollector, self).__init__(*args, **kwargs)
-        self.results = []
+        self.RESULT = []
+
+    def v2_playbook_on_stats(self, stats):
+        super(PlaybookResultsCollector, self).v2_playbook_on_stats(stats)
+
+        for play in self.results:
+            for task in play.get("tasks", []):
+                res = task["task"]
+                res["hosts"] = {}
+                for ip, detail in task["hosts"].items():
+                    _failed = False
+                    if detail.get("stderr"):
+                        _failed = True
+                    res["hosts"][ip] = {
+                        "stderr": detail.get("stderr"),
+                        "stdout": detail.get("stdout"),
+                        "success": not _failed
+                    }
+                    self.RESULT.append(res)
 
 
 class BaseRunner(object):
     """Base Runner for tasks and playbook."""
     def __init__(self, hosts=None, username=None, password=None, key_file=None,
                  timeout=None, ssh_retries=6):
-        self.hosts = hosts
+        if type(hosts) is list:
+            self.hosts = hosts
+        if type(hosts) is str:
+            self.hosts = [hosts]
         self._create_inventory()
 
         self._set_options(username, module_path='',
@@ -78,7 +99,7 @@ class BaseRunner(object):
         self.variable_manager = VariableManager(loader=self.loader,
                                                 inventory=self.inventory)
 
-    def _set_options(self, username="root", forks=100, become=None,
+    def _set_options(self, username=None, forks=100, become=None,
                      become_method=None, become_user=None, check=False,
                      key_file=None,
                      module_path="/to/mymodules",
@@ -118,7 +139,6 @@ class BaseRunner(object):
         C.HOST_KEY_CHECKING = False
         C.DEPRECATION_WARNINGS = False
         C.ANSIBLE_SSH_RETRIES = ssh_retries
-        C.ANSIBLE_TIMEOUT = timeout
         C.COMMAND_WARNINGS = False
 
     def set_extra_vars(self, extra_vars):
@@ -173,7 +193,7 @@ class TaskRunner(BaseRunner):
     def _create_source(self):
         self.play_source = dict(
             name=PLAY_NAME,
-            hosts='all',
+            hosts=self.hosts,
             gather_facts='no',
             tasks=self.tasks
         )
